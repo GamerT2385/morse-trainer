@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Morse Trainer & Converter</title>
+<style>
+  body { font-family: Arial; background:#1e1e1e; color:#f1f1f1; padding:20px; }
+  textarea, input[type=text], input[type=number] { width:100%; margin:5px 0; padding:5px; background:#2b2b2b; color:#fff; border:1px solid #444; border-radius:5px; }
+  button { margin:5px 0; padding:5px 10px; border:none; border-radius:5px; background:#4CAF50; color:white; cursor:pointer; }
+  button:hover { background:#45a049; }
+  .stop { background:#c0392b; }
+  .stop:hover { background:#e74c3c; }
+  .section { margin:15px 0; padding:10px; border:1px solid #444; border-radius:8px; }
+  .output { margin-top:10px; padding:10px; background:#333; border-radius:5px; min-height:40px; }
+  .correct { color:#0f0; font-weight:bold; }
+  .wrong { color:#f00; font-weight:bold; }
+</style>
+</head>
+<body>
+
+<h1>Morse Trainer & Converter</h1>
+
+<!-- Mode Selector -->
+<label>Mode: 
+<select id="modeSelect" onchange="switchMode()">
+  <option value="convert">Converter</option>
+  <option value="train">Trainer</option>
+</select>
+</label>
+
+<!-- Converter Section -->
+<div id="convertSection" class="section">
+  <h2>Converter</h2>
+  <textarea id="inputText" placeholder="Paste text here..."></textarea>
+  <input type="file" id="fileInput" accept=".txt">
+  <br>
+  <label>Dot (ms): <input type="number" id="dot" value="200"></label>
+  <label>Dash (ms): <input type="number" id="dash" value="600"></label>
+  <label>Letter Space (ms): <input type="number" id="letterSpace" value="600"></label>
+  <label>Word Space (ms): <input type="number" id="wordSpace" value="1400"></label>
+  <label>Frequency (Hz): <input type="number" id="freq" value="600"></label>
+  <br>
+  <button onclick="convertToMorse()">Convert</button>
+  <button onclick="playMorse()">Play Beeps</button>
+  <button class="stop" onclick="stopPlayback()">Stop</button>
+  <div class="output" id="morseOutput"></div>
+</div>
+
+<!-- Trainer Section -->
+<div id="trainSection" class="section" style="display:none;">
+  <h2>Trainer</h2>
+  <label>Custom Letters (optional): <input type="text" id="customLetters" placeholder="Leave empty for random letters"></label><br>
+  <label>Number of letters per round: <input type="number" id="numLetters" value="5"></label><br>
+  <label><input type="checkbox" id="includeNumbers"> Include Numbers</label><br>
+  <label>Dot (ms): <input type="number" id="trainDot" value="200"></label>
+  <label>Dash (ms): <input type="number" id="trainDash" value="600"></label>
+  <label>Frequency (Hz): <input type="number" id="trainFreq" value="600"></label><br>
+  <button onclick="startTrainer()">Play Random Letters</button>
+  <button class="stop" onclick="stopPlayback()">Stop</button><br>
+  <input type="text" id="trainerAnswer" placeholder="Type what you heard...">
+  <button onclick="checkTrainerAnswer()">Check Answer</button>
+  <div class="output" id="trainerFeedback">Press "Play Random Letters" to start.</div>
+  <div class="output" id="scoreBox">Correct: 0 | Total: 0 | Accuracy: 0%</div>
+</div>
+
+<script>
+const morseCode = {
+  'A': '.-',    'B': '-...',  'C': '-.-.',  'D': '-..',
+  'E': '.',     'F': '..-.',  'G': '--.',   'H': '....',
+  'I': '..',    'J': '.---',  'K': '-.-',   'L': '.-..',
+  'M': '--',    'N': '-.',    'O': '---',   'P': '.--.',
+  'Q': '--.-',  'R': '.-.',   'S': '...',   'T': '-',
+  'U': '..-',   'V': '...-',  'W': '.--',   'X': '-..-',
+  'Y': '-.--',  'Z': '--..',
+  '0': '-----', '1': '.----', '2': '..---', '3': '...--',
+  '4': '....-', '5': '.....', '6': '-....', '7': '--...',
+  '8': '---..', '9': '----.'
+};
+
+let audioCtx = null;
+let stopFlag = false;
+let trainerSequence = '';
+let correct = 0;
+let total = 0;
+
+// Load saved data
+window.onload = () => {
+  const saved = localStorage.getItem('morseTrainerData');
+  if (saved) {
+    const data = JSON.parse(saved);
+    correct = data.correct || 0;
+    total = data.total || 0;
+    document.getElementById('scoreBox').innerText = `Correct: ${correct} | Total: ${total} | Accuracy: ${total?Math.round(correct/total*100):0}%`;
+    document.getElementById('customLetters').value = data.customLetters || '';
+    document.getElementById('includeNumbers').checked = data.includeNumbers || false;
+  }
+};
+
+// Mode switch
+function switchMode() {
+  const mode = document.getElementById('modeSelect').value;
+  document.getElementById('convertSection').style.display = mode==='convert'?'block':'none';
+  document.getElementById('trainSection').style.display = mode==='train'?'block':'none';
+}
+
+// Converter functions
+function convertToMorse() {
+  const text = document.getElementById('inputText').value.toUpperCase();
+  let output = '';
+  for (let char of text) {
+    if (morseCode[char]) output += morseCode[char]+' ';
+    else if (char===' ') output+='/ ';
+  }
+  document.getElementById('morseOutput').innerText = output.trim();
+}
+
+function playMorse() {
+  const morse = document.getElementById('morseOutput').innerText;
+  playMorseString(morse,
+    parseInt(document.getElementById('dot').value),
+    parseInt(document.getElementById('dash').value),
+    parseInt(document.getElementById('letterSpace').value),
+    parseInt(document.getElementById('wordSpace').value),
+    parseInt(document.getElementById('freq').value)
+  );
+}
+
+// Trainer functions
+function startTrainer() {
+  const num = parseInt(document.getElementById('numLetters').value);
+  const custom = document.getElementById('customLetters').value.toUpperCase().replace(/[^A-Z]/g,'');
+  const includeNumbers = document.getElementById('includeNumbers').checked;
+  const letters = custom.length ? custom : Object.keys(morseCode).filter(c=>/[A-Z]/.test(c));
+  if (includeNumbers) letters.push(...Object.keys(morseCode).filter(c=>/[0-9]/.test(c)));
+
+  trainerSequence = '';
+  for (let i=0;i<num;i++) {
+    trainerSequence += letters[Math.floor(Math.random()*letters.length)];
+  }
+  document.getElementById('trainerFeedback').innerText = '🔊 Sequence played. Type your guess.';
+  document.getElementById('trainerAnswer').value='';
+  playTrainerSequence(trainerSequence);
+}
+
+function playTrainerSequence(sequence) {
+  const dot = parseInt(document.getElementById('trainDot').value);
+  const dash = parseInt(document.getElementById('trainDash').value);
+  const freq = parseInt(document.getElementById('trainFreq').value);
+  let time = (audioCtx ? audioCtx.currentTime : 0) || 0;
+  if(audioCtx) audioCtx.close();
+  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  stopFlag = false;
+  sequence.split('').forEach(char=>{
+    if(stopFlag) return;
+    const symbols = morseCode[char];
+    for(let s of symbols){
+      if(stopFlag) return;
+      if(s==='.'){beep(time, dot, freq); time+=dot/1000+0.1;} 
+      else {beep(time, dash, freq); time+=dash/1000+0.1;}
+    }
+    time += dot*3/1000; // space between letters
+  });
+}
+
+function beep(start, duration, freq){
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.type='sine'; osc.frequency.setValueAtTime(freq,audioCtx.currentTime);
+  osc.start(start); osc.stop(start+duration/1000);
+}
+
+function checkTrainerAnswer() {
+  const ans = document.getElementById('trainerAnswer').value.toUpperCase().trim();
+  const fb = document.getElementById('trainerFeedback');
+  total++;
+  if(ans===trainerSequence){
+    correct++;
+    fb.innerHTML=`<span class="correct">✅ Correct! You typed: ${ans}</span>`;
+  } else {
+    fb.innerHTML=`<span class="wrong">❌ Wrong. You typed: ${ans} | Correct: ${trainerSequence}</span>`;
+  }
+  const percent = Math.round(correct/total*100);
+  document.getElementById('scoreBox').innerText = `Correct: ${correct} | Total: ${total} | Accuracy: ${percent}%`;
+  saveTrainerData();
+}
+
+function saveTrainerData(){
+  const data = {
+    correct, total,
+    customLetters: document.getElementById('customLetters').value,
+    includeNumbers: document.getElementById('includeNumbers').checked
+  };
+  localStorage.setItem('morseTrainerData', JSON.stringify(data));
+}
+
+function stopPlayback(){stopFlag=true; if(audioCtx){audioCtx.close();audioCtx=null;}}
+document.getElementById('fileInput').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{document.getElementById('inputText').value=ev.target.result;}
+  reader.readAsText(f);
+});
+</script>
+</body>
+</html>
